@@ -1,13 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
-from collections import namedtuple, OrderedDict
 import itertools
 import json
-from six import string_types
-from six.moves.urllib import parse
+from collections import namedtuple, OrderedDict
+from urllib import parse
 
 import requests
 
@@ -29,6 +23,9 @@ def connect(
     password=None,
     context=None,
     header=False,
+    ssl_verify_cert=True,
+    ssl_client_cert=None,
+    proxies=None,
 ):  # noqa: E125
     """
     Constructor for creating a connection to the database.
@@ -38,7 +35,20 @@ def connect(
 
     """
     context = context or {}
-    return Connection(host, port, path, scheme, user, password, context, header)
+
+    return Connection(
+        host,
+        port,
+        path,
+        scheme,
+        user,
+        password,
+        context,
+        header,
+        ssl_verify_cert,
+        ssl_client_cert,
+        proxies,
+    )
 
 
 def check_closed(f):
@@ -94,7 +104,7 @@ def get_type(value):
     Note that bool is a subclass of int so order of statements matter.
     """
 
-    if isinstance(value, string_types) or value is None:
+    if isinstance(value, str) or value is None:
         return Type.STRING
     elif isinstance(value, bool):
         return Type.BOOLEAN
@@ -105,7 +115,6 @@ def get_type(value):
 
 
 class Connection(object):
-
     """Connection to a Druid database."""
 
     def __init__(
@@ -118,6 +127,9 @@ class Connection(object):
         password=None,
         context=None,
         header=False,
+        ssl_verify_cert=True,
+        ssl_client_cert=None,
+        proxies=None,
     ):
         netloc = "{host}:{port}".format(host=host, port=port)
         self.url = parse.urlunparse((scheme, netloc, path, None, None, None))
@@ -127,6 +139,9 @@ class Connection(object):
         self.header = header
         self.user = user
         self.password = password
+        self.ssl_verify_cert = ssl_verify_cert
+        self.ssl_client_cert = ssl_client_cert
+        self.proxies = proxies
 
     @check_closed
     def close(self):
@@ -150,7 +165,18 @@ class Connection(object):
     @check_closed
     def cursor(self):
         """Return a new Cursor Object using the connection."""
-        cursor = Cursor(self.url, self.user, self.password, self.context, self.header)
+
+        cursor = Cursor(
+            self.url,
+            self.user,
+            self.password,
+            self.context,
+            self.header,
+            self.ssl_verify_cert,
+            self.ssl_client_cert,
+            self.proxies,
+        )
+
         self.cursors.append(cursor)
 
         return cursor
@@ -168,15 +194,27 @@ class Connection(object):
 
 
 class Cursor(object):
-
     """Connection cursor."""
 
-    def __init__(self, url, user=None, password=None, context=None, header=False):
+    def __init__(
+        self,
+        url,
+        user=None,
+        password=None,
+        context=None,
+        header=False,
+        ssl_verify_cert=True,
+        proxies=None,
+        ssl_client_cert=None,
+    ):
         self.url = url
         self.context = context or {}
         self.header = header
         self.user = user
         self.password = password
+        self.ssl_verify_cert = ssl_verify_cert
+        self.ssl_client_cert = ssl_client_cert
+        self.proxies = proxies
 
         # This read/write attribute specifies the number of rows to fetch at a
         # time with .fetchmany(). It defaults to 1 meaning to fetch a single
@@ -300,7 +338,14 @@ class Cursor(object):
             requests.auth.HTTPBasicAuth(self.user, self.password) if self.user else None
         )
         r = requests.post(
-            self.url, stream=True, headers=headers, json=payload, auth=auth
+            self.url,
+            stream=True,
+            headers=headers,
+            json=payload,
+            auth=auth,
+            verify=self.ssl_verify_cert,
+            cert=self.ssl_client_cert,
+            proxies=self.proxies,
         )
         if r.encoding is None:
             r.encoding = "utf-8"
@@ -395,7 +440,7 @@ def escape(value):
 
     if value == "*":
         return value
-    elif isinstance(value, string_types):
+    elif isinstance(value, str):
         return "'{}'".format(value.replace("'", "''"))
     elif isinstance(value, bool):
         return "TRUE" if value else "FALSE"
